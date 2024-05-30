@@ -38,6 +38,7 @@ class SwapiPeople(Base):
     starships: Mapped[str] = mapped_column(String())
     vehicles: Mapped[str] = mapped_column(String())
 
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

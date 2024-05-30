@@ -2,6 +2,9 @@ import asyncio
 import aiohttp
 
 from models import init_db, Session, SwapiPeople
+from more_itertools import chunked
+
+MAX_CHUNK = 10
 
 
 async def get_response(path, session):
@@ -9,39 +12,79 @@ async def get_response(path, session):
         json_data = await response.json()
         return json_data
 
-async def insert_to_db(list_of_people):
+
+async def get_lists(list_of_links, field_name, http_session):
+    coros = [get_response(link, http_session) for link in list_of_links]
+    result = await asyncio.gather(*coros)
+    objects_array = [elem.get(f"{field_name}") for elem in result]
+
+    return objects_array
+async def prepare_orm_obj(person, http_session):
+        films_list = (
+            await get_lists(person["films"], "title", http_session)
+            if person.get("films")
+            else []
+        )
+        species_list = (
+            await get_lists(person["species"], "name", http_session)
+            if person.get("species")
+            else []
+        )
+        starships_list = (
+            await get_lists(person["starships"], "name", http_session)
+            if person.get("starships")
+            else []
+        )
+        vehicles_list = (
+            await get_lists(person["vehicles"], "name", http_session)
+            if person.get("vehicles")
+            else []
+        )
+        orm_object = SwapiPeople(
+            birth_year=person.get('birth_year', 'n/a'),
+            eye_color=person.get('eye_color', 'n/a'),
+            films=",".join(films_list),
+            gender=person.get('gender', 'n/a'),
+            hair_color=person.get('hair_color', 'n/a'),
+            height=person.get('height', 'n/a'),
+            homeworld=person.get('homeworld', 'n/a'),
+            mass=person.get('mass', 'n/a'),
+            name=person.get('name', 'n/a'),
+            skin_color=person.get('skin_color', 'n/a'),
+            species=",".join(species_list),
+            starships=",".join(starships_list),
+            vehicles=",".join(vehicles_list),
+        )
+        return orm_object
+
+async def insert_to_db(list_of_people, http_session):
     async with Session() as session:
-        orm_objects = [SwapiPeople(
-            birth_year=person['birth_year'],
-            eye_color=person['eye_color'],
-            films=','.join(person['films']),
-            gender=person['gender'],
-            hair_color=person['hair_color'],
-            height=person['height'],
-            homeworld=person['homeworld'],
-            mass=person['mass'],
-            name=person['name'],
-            skin_color=person['skin_color'],
-            species=','.join(person['species']),
-            starships=','.join(person['starships']),
-            vehicles=','.join(person['vehicles'])
-        ) for person in list_of_people]
-        session.add_all(orm_objects)
+        person_coros = [prepare_orm_obj(person, http_session) for person in list_of_people]
+        orm_obj_list = await asyncio.gather(*person_coros)
+        session.add_all(orm_obj_list)
         await session.commit()
 
-async def main(path):
-    async with aiohttp.ClientSession() as session:
-        api_response = await get_response(path, session)
-        people = api_response['results']
-        await insert_to_db(people)
+async def main(base_path):
+    await init_db()
+    async with aiohttp.ClientSession() as http_session:
+        api_response = await get_response(base_path, http_session)
+        people_count = api_response["count"]
+        people_ids = chunked(range(1, people_count + 1), MAX_CHUNK)
+        for people_ids_chunk in people_ids:
+            coros = [
+                get_response(f"{base_path}/{people_id}/", http_session)
+                for people_id in people_ids_chunk
+            ]
+            list_of_people = await asyncio.gather(*coros)
+            asyncio.create_task(insert_to_db(list_of_people, http_session))
 
-        next_page_path = api_response.get('next')
-        if next_page_path:
-            await main(next_page_path)
+        main_task = asyncio.current_task()
+        current_tasks = asyncio.all_tasks()
+        current_tasks.remove(main_task)
+        await asyncio.gather(*current_tasks)
 
 
-
-BASE_PATH = 'https://swapi.dev/api/people'
-asyncio.run(init_db())
+BASE_PATH = "https://swapi.dev/api/people"
 asyncio.run(main(BASE_PATH))
 print("Finished")
+
