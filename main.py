@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime
+
 import aiohttp
 
 from models import init_db, Session, SwapiPeople
@@ -20,42 +22,51 @@ async def get_lists(list_of_links, field_name, http_session):
 
     return objects_array
 async def prepare_orm_obj(person, http_session):
-        films_list = (
-            await get_lists(person["films"], "title", http_session)
-            if person.get("films")
-            else []
-        )
-        species_list = (
-            await get_lists(person["species"], "name", http_session)
-            if person.get("species")
-            else []
-        )
-        starships_list = (
-            await get_lists(person["starships"], "name", http_session)
-            if person.get("starships")
-            else []
-        )
-        vehicles_list = (
-            await get_lists(person["vehicles"], "name", http_session)
-            if person.get("vehicles")
-            else []
-        )
-        orm_object = SwapiPeople(
-            birth_year=person.get('birth_year', 'n/a'),
-            eye_color=person.get('eye_color', 'n/a'),
-            films=",".join(films_list),
-            gender=person.get('gender', 'n/a'),
-            hair_color=person.get('hair_color', 'n/a'),
-            height=person.get('height', 'n/a'),
-            homeworld=person.get('homeworld', 'n/a'),
-            mass=person.get('mass', 'n/a'),
-            name=person.get('name', 'n/a'),
-            skin_color=person.get('skin_color', 'n/a'),
-            species=",".join(species_list),
-            starships=",".join(starships_list),
-            vehicles=",".join(vehicles_list),
-        )
-        return orm_object
+    tasks = []
+
+    films_task = None
+    if person.get("films"):
+        films_task = asyncio.create_task(get_lists(person["films"], "title", http_session))
+        tasks.append(films_task)
+
+    species_task = None
+    if person.get("species"):
+        species_task = asyncio.create_task(get_lists(person["species"], "name", http_session))
+        tasks.append(species_task)
+
+    starships_task = None
+    if person.get("starships"):
+        starships_task = asyncio.create_task(get_lists(person["starships"], "name", http_session))
+        tasks.append(starships_task)
+
+    vehicles_task = None
+    if person.get("vehicles"):
+        vehicles_task = asyncio.create_task(get_lists(person["vehicles"], "name", http_session))
+        tasks.append(vehicles_task)
+
+    await asyncio.gather(*tasks)
+
+    films_list = films_task.result() if films_task else []
+    species_list = species_task.result() if species_task else []
+    starships_list = starships_task.result() if starships_task else []
+    vehicles_list = vehicles_task.result() if vehicles_task else []
+
+    orm_object = SwapiPeople(
+        birth_year=person.get('birth_year', 'n/a'),
+        eye_color=person.get('eye_color', 'n/a'),
+        films=",".join(films_list),
+        gender=person.get('gender', 'n/a'),
+        hair_color=person.get('hair_color', 'n/a'),
+        height=person.get('height', 'n/a'),
+        homeworld=person.get('homeworld', 'n/a'),
+        mass=person.get('mass', 'n/a'),
+        name=person.get('name', 'n/a'),
+        skin_color=person.get('skin_color', 'n/a'),
+        species=",".join(species_list),
+        starships=",".join(starships_list),
+        vehicles=",".join(vehicles_list),
+    )
+    return orm_object
 
 async def insert_to_db(list_of_people, http_session):
     async with Session() as session:
@@ -85,6 +96,7 @@ async def main(base_path):
 
 
 BASE_PATH = "https://swapi.dev/api/people"
+start = datetime.now()
 asyncio.run(main(BASE_PATH))
+print(datetime.now() - start)
 print("Finished")
-
